@@ -21,6 +21,17 @@ MENTOR_PERSONA = (
 )
 
 
+def extract_text(response) -> str:
+    """
+    Safely pulls the text content out of a Claude response, skipping
+    any 'thinking' blocks that may come first.
+    """
+    for block in response.content:
+        if block.type == "text":
+            return block.text.strip()
+    return ""
+
+
 def infer_tier_from_note(raw_note: str) -> tuple:
     """
     Uses Claude to estimate an appropriate tier based on the clinician's
@@ -42,10 +53,10 @@ Return ONLY valid JSON with exactly these fields:
 
     response = client.messages.create(
         model="claude-sonnet-5",
-        max_tokens=200,
+        max_tokens=300,
         messages=[{"role": "user", "content": prompt}]
     )
-    text = response.content[0].text.strip()
+    text = extract_text(response)
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
 
     try:
@@ -87,14 +98,14 @@ Write your response to the clinician now, following the tier calibration above."
 
     response = client.messages.create(
         model="claude-sonnet-5",
-        max_tokens=1000,
+        max_tokens=1500,
         messages=[{"role": "user", "content": prompt}]
     )
 
     return {
         "tier_used": tier,
         "tier_rationale": rationale,
-        "response_text": response.content[0].text.strip(),
+        "response_text": extract_text(response),
     }
 
 

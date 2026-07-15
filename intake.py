@@ -7,6 +7,12 @@ from anthropic import Anthropic
 load_dotenv()
 client = Anthropic()
 
+def extract_text(response) -> str:
+    for block in response.content:
+        if block.type == "text":
+            return block.text.strip()
+    return ""
+
 def parse_clinician_note(raw_input: str) -> dict:
     """
     Sends a clinician's free-text note to Claude and returns
@@ -31,9 +37,7 @@ Return ONLY the JSON object, no other text."""
         messages=[{"role": "user", "content": prompt}]
     )
 
-    result_text = response.content[0].text.strip()
-
-    # Strip markdown code fences if Claude added them
+    result_text = extract_text(response)
     result_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", result_text.strip())
 
     try:
