@@ -8,16 +8,18 @@ load_dotenv()
 client = Anthropic()
 
 TIER_DESCRIPTIONS = {
-    1: "Tier 1 - Confirmation & Context: Confirm the diagnosis is consistent with the evidence, present the most relevant facts from the note, and cite supporting literature. Minimal interpretation. Build trust through accuracy and clarity, not depth.",
-    2: "Tier 2 - Exploration & Options: Explain what the current research actually shows, not just that it exists. Lay out treatment options with tradeoffs. Frame this as a decision the clinician is making, with ARIA as an advisor, not a verdict.",
-    3: "Tier 3 - Deep Teaching: Give the high-level picture plus the underlying reasoning. Explain why the evidence points this way, what is still debated, and how this case fits into broader patterns. The goal is growing the clinician's own judgment, like a mentor teaching a skill, not just delivering an answer.",
+    1: "Tier 1 - Confirmation & Context: Confirm the diagnosis is consistent with the evidence, present the most relevant facts from the note, and cite supporting literature. Minimal interpretation. Build trust through accuracy and clarity, not depth. Do not end with a comprehension question, this tier is about fast confirmation.",
+    2: "Tier 2 - Exploration & Options: Explain what the current research actually shows, not just that it exists. Lay out treatment options with tradeoffs. Frame this as a decision the clinician is making, with ARIA as an advisor, not a verdict. End your response with one short, specific comprehension-check question that invites the clinician to reason through a key tradeoff, in the spirit of a mentor checking understanding, not testing them.",
+    3: "Tier 3 - Deep Teaching: Give the high-level picture plus the underlying reasoning. Explain why the evidence points this way, what is still debated, and how this case fits into broader patterns. The goal is growing the clinician's own judgment, like a mentor teaching a skill, not just delivering an answer. End your response with one thoughtful comprehension-check question that invites the clinician to apply or extend the reasoning you just gave.",
 }
 
 MENTOR_PERSONA = (
     "You are ARIA, a clinical decision support mentor. Your tone is calm, "
     "precise, and encouraging, like a trusted senior colleague who wants "
     "the clinician to grow, not just get an answer. You are direct and "
-    "evidence-based, never vague or falsely reassuring."
+    "evidence-based, never vague or falsely reassuring. When a clinician "
+    "responds to one of your questions, acknowledge their reasoning "
+    "specifically before adding anything new, a good mentor listens first."
 )
 
 
@@ -68,8 +70,8 @@ Return ONLY valid JSON with exactly these fields:
 
 def generate_response(parsed_entities: dict, literature: dict, raw_note: str, tier: int = None) -> dict:
     """
-    Main entry point. If tier is None, infers it from the note.
-    Returns the final mentor-style response calibrated to that tier.
+    Main entry point for the FIRST response in a conversation.
+    If tier is None, infers it from the note.
     """
     rationale = "Selected directly by clinician."
     if tier is None:
@@ -109,6 +111,25 @@ Write your response to the clinician now, following the tier calibration above."
     }
 
 
+def continue_conversation(conversation_history: list, tier: int) -> str:
+    """
+    Handles a follow-up turn. conversation_history is a list of
+    {"role": "user"|"assistant", "content": str} dicts representing
+    the conversation so far, ending with the clinician's newest message.
+    """
+    tier_instructions = TIER_DESCRIPTIONS[tier]
+    system_prompt = f"{MENTOR_PERSONA}\n\nCalibration for this conversation:\n{tier_instructions}"
+
+    response = client.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=1000,
+        system=system_prompt,
+        messages=conversation_history,
+    )
+
+    return extract_text(response)
+
+
 if __name__ == "__main__":
     test_entities = {
         "diagnosis": "osteoarthritis knee",
@@ -122,7 +143,7 @@ if __name__ == "__main__":
              "abstract": "Knee osteoarthritis typically presents with joint pain exacerbated by use..."}
         ]
     }
-    test_note = "Patient with worsening knee OA, failed conservative management. What next?"
+    test_note = "I'd like to explore next steps for this knee OA patient given the research on injection durability."
 
     result = generate_response(test_entities, test_literature, test_note, tier=None)
     print(json.dumps(result, indent=2))
