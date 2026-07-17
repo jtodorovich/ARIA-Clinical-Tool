@@ -1,81 +1,221 @@
-﻿import streamlit as st
+﻿import re
+import streamlit as st
+from auth import require_login
+
+require_login()
 from intake import parse_clinician_note
-from rag import retrieve_literature
+from rag import retrieve_literature_smart, generate_clarifying_question
 from literacy_engine import generate_response, continue_conversation
 from log import log_interaction
+
+MAX_CLARIFYING_ROUNDS = 3
+
+
+def split_question(text: str):
+    """
+    Splits ARIA's response into (main_text, question) if a
+    '**Question for you:**' marker is present. Returns (text, None)
+    if no marker is found.
+    """
+    match = re.search(r"\*\*Question for you:\*\*\s*(.+)", text, re.DOTALL)
+    if match:
+        question = match.group(1).strip()
+        main_text = text[:match.start()].strip()
+        return main_text, question
+    return text, None
+
+
+def render_aria_message(text: str):
+    main_text, question = split_question(text)
+    st.markdown(main_text)
+    if question:
+        st.info(f"**ARIA is asking:** {question}")
+
 
 st.title("ARIA")
 st.subheader("Adaptive Rehabilitation Intelligence Assistant")
 
-if "conversation" not in st.session_state:
+if "stage" not in st.session_state:
+    st.session_state.stage = "intake"
     st.session_state.conversation = []
     st.session_state.tier_used = None
     st.session_state.parsed = None
     st.session_state.literature = None
     st.session_state.original_note = None
+    st.session_state.tier_choice_value = None
+    st.session_state.clarifications = []
 
-if not st.session_state.conversation:
+
+def reset_case():
+    st.session_state.stage = "intake"
+    st.session_state.conversation = []
+    st.session_state.tier_used = None
+    st.session_state.parsed = None
+    st.session_state.literature = None
+    st.session_state.original_note = None
+    st.session_state.tier_choice_value = None
+    st.session_state.clarifications = []
+
+
+tier_map = {
+    "Let ARIA decide": None,
+    "Tier 1 - Quick confirmation": 1,
+    "Tier 2 - Explore options": 2,
+    "Tier 3 - Deep teaching": 3,
+}
+
+# ---------- STAGE: intake ----------
+if st.session_state.stage == "intake":
     st.write("Enter a clinician note below. ARIA will confirm the diagnosis, pull relevant literature, and respond as a mentor calibrated to your preferred level of detail.")
 
     clinician_note = st.text_area("Enter a clinician note or query:")
-
-    tier_choice = st.selectbox(
-        "Response style:",
-        options=["Let ARIA decide", "Tier 1 - Quick confirmation", "Tier 2 - Explore options", "Tier 3 - Deep teaching"],
-    )
-    tier_map = {
-        "Let ARIA decide": None,
-        "Tier 1 - Quick confirmation": 1,
-        "Tier 2 - Explore options": 2,
-        "Tier 3 - Deep teaching": 3,
-    }
+    tier_choice = st.selectbox("Response style:", options=list(tier_map.keys()))
 
     if st.button("Submit"):
-        if clinician_note:
+        if not clinician_note or not clinician_note.strip():
+            st.warning("Please enter some text before submitting.")
+        else:
             with st.spinner("Analyzing note..."):
                 parsed = parse_clinician_note(clinician_note)
-            with st.spinner("Searching medical literature..."):
-                literature = retrieve_literature(parsed)
-            with st.spinner("Preparing response..."):
-                selected_tier = tier_map[tier_choice]
-                result = generate_response(parsed, literature, clinician_note, tier=selected_tier)
 
-            st.session_state.parsed = parsed
-            st.session_state.literature = literature
-            st.session_state.tier_used = result["tier_used"]
-            st.session_state.original_note = clinician_note
-            st.session_state.conversation = [
-                {"role": "user", "content": clinician_note},
-                {"role": "assistant", "content": result["response_text"]},
-            ]
+            if parsed.get("error"):
+                st.error(parsed["error"])
+            else:
+                st.session_state.parsed = parsed
+                st.session_state.original_note = clinician_note
+                st.session_state.tier_choice_value = tier_map[tier_choice]
+                st.session_state.clarifications = []
+                st.session_state.stage = "searching"
+                st.rerun()
 
-            log_interaction({
-                "type": "initial_response",
-                "note": clinician_note,
-                "tier_used": result["tier_used"],
-                "tier_rationale": result["tier_rationale"],
-                "response": result["response_text"],
-            })
+# ---------- STAGE: searching (with clarifying loop) ----------
+elif st.session_state.stage == "searching":
+    with st.spinner("Searching medical literature..."):
+        literature = retrieve_literature_smart(
+            st.session_state.original_note,
+            st.session_state.parsed,
+            st.session_state.clarifications,
+        )
 
+    if literature["sources"] or len(st.session_state.clarifications) >= MAX_CLARIFYING_ROUNDS:
+        st.session_state.literature = literature
+        st.session_state.stage = "respond" if literature["sources"] else "give_up_and_respond"
+        st.rerun()
+    else:
+        with st.spinner("Refining the search..."):
+            question = generate_clarifying_question(
+                st.session_state.original_note,
+                st.session_state.parsed,
+                st.session_state.clarifications,
+            )
+        st.session_state.pending_question = question
+        st.session_state.stage = "awaiting_clarification"
+        st.rerun()
+
+# ---------- STAGE: awaiting_clarification ----------
+elif st.session_state.stage == "awaiting_clarification":
+    st.info(f"ARIA is having trouble finding targeted literature. To help narrow the search ({len(st.session_state.clarifications) + 1} of {MAX_CLARIFYING_ROUNDS}):")
+    st.markdown(f"**ARIA is asking:** {st.session_state.pending_question}")
+    answer = st.text_input("Your answer:")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Submit answer"):
+            if answer and answer.strip():
+                st.session_state.clarifications.append({
+                    "question": st.session_state.pending_question,
+                    "answer": answer,
+                })
+                st.session_state.stage = "searching"
+                st.rerun()
+            else:
+                st.warning("Please enter an answer, or choose to skip below.")
+    with col2:
+        if st.button("Skip and proceed with best available information"):
+            st.session_state.stage = "give_up_and_respond"
             st.rerun()
-        else:
-            st.warning("Please enter some text before submitting.")
 
-else:
+# ---------- STAGE: give_up_and_respond ----------
+elif st.session_state.stage == "give_up_and_respond":
+    literature = retrieve_literature_smart(
+        st.session_state.original_note,
+        st.session_state.parsed,
+        st.session_state.clarifications,
+    )
+    literature["note"] = "No matching literature was found even after clarifying questions. ARIA will respond using clinical reasoning alone."
+    st.session_state.literature = literature
+    st.session_state.stage = "respond"
+    st.rerun()
+
+# ---------- STAGE: respond ----------
+elif st.session_state.stage == "respond":
+    literature = st.session_state.literature
+    if literature.get("note"):
+        st.info(literature["note"])
+
+    with st.spinner("Preparing response..."):
+        result = generate_response(
+            st.session_state.parsed,
+            literature,
+            st.session_state.original_note,
+            tier=st.session_state.tier_choice_value,
+        )
+
+    if result.get("tier_used") is None:
+        st.error(result["response_text"])
+        if st.button("Start over"):
+            reset_case()
+            st.rerun()
+    else:
+        st.session_state.tier_used = result["tier_used"]
+        st.session_state.conversation = [
+            {"role": "user", "content": st.session_state.original_note},
+            {"role": "assistant", "content": result["response_text"]},
+        ]
+        log_interaction({
+            "type": "initial_response",
+            "note": st.session_state.original_note,
+            "clarifications": st.session_state.clarifications,
+            "search_query": literature.get("query_used"),
+            "tier_used": result["tier_used"],
+            "tier_rationale": result["tier_rationale"],
+            "response": result["response_text"],
+        })
+        st.session_state.stage = "conversation"
+        st.rerun()
+
+# ---------- STAGE: conversation ----------
+elif st.session_state.stage == "conversation":
     st.markdown(f"**Response tier:** {st.session_state.tier_used}")
     st.divider()
 
     for turn in st.session_state.conversation:
         role_label = "You" if turn["role"] == "user" else "ARIA"
         with st.chat_message("user" if turn["role"] == "user" else "assistant"):
-            st.markdown(f"**{role_label}:** {turn['content']}")
+            if turn["role"] == "assistant":
+                st.markdown(f"**{role_label}:**")
+                render_aria_message(turn["content"])
+            else:
+                st.markdown(f"**{role_label}:** {turn['content']}")
 
     with st.expander("See extracted clinical data"):
         st.json(st.session_state.parsed)
 
-    with st.expander(f"See {len(st.session_state.literature['sources'])} supporting literature sources"):
-        st.write(f"Search query used: `{st.session_state.literature['query_used']}`")
-        for source in st.session_state.literature["sources"]:
+    literature = st.session_state.literature
+    num_sources = len(literature.get("sources", []))
+    with st.expander(f"About the literature ({num_sources} source(s) found)"):
+        st.markdown("**Source:** PubMed, via the National Library of Medicine's NCBI database")
+        if literature.get("query_used"):
+            st.markdown(f"**Search query used:**\n```\n{literature['query_used']}\n```")
+        if literature.get("rationale"):
+            st.markdown(f"**Why these terms:** {literature['rationale']}")
+        if st.session_state.clarifications:
+            st.markdown("**Clarifying questions used to refine the search:**")
+            for c in st.session_state.clarifications:
+                st.markdown(f"- *{c['question']}* → {c['answer']}")
+        if literature.get("note"):
+            st.info(literature["note"])
+        for source in literature.get("sources", []):
             st.markdown(f"**{source['title']}** (PMID: {source['pmid']})")
             st.write(source["abstract"])
 
@@ -85,7 +225,7 @@ else:
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("Send"):
-            if follow_up:
+            if follow_up and follow_up.strip():
                 st.session_state.conversation.append({"role": "user", "content": follow_up})
                 with st.spinner("ARIA is thinking..."):
                     reply = continue_conversation(st.session_state.conversation, st.session_state.tier_used)
@@ -97,12 +237,12 @@ else:
                     "clinician_message": follow_up,
                     "aria_reply": reply,
                 })
-
                 st.rerun()
-
+            else:
+                st.warning("Please enter a message before sending.")
     with col2:
         if st.button("Start a new case"):
-            st.session_state.conversation = []
+            reset_case()
             st.rerun()
 
     st.divider()
@@ -127,3 +267,4 @@ else:
             st.success("Thanks, feedback logged.")
         else:
             st.warning("Please select a rating first.")
+
