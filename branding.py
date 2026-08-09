@@ -73,6 +73,23 @@ def inject_style():
         .aria-hero .word { font-weight: 700; font-size: 30px; letter-spacing: 3px; color: #FFFFFF; line-height: 1.05; }
         .aria-hero .tag { font-size: 13.5px; font-weight: 500; color: #9FD9DC; margin-top: 2px; }
         .aria-hero .val { font-size: 12.5px; color: #CDEBEC; margin-top: 6px; opacity: 0.9; }
+        /* patient header card (Executive Chart) */
+        .aria-patient { background:#FFFFFF; border:1px solid #CBDEDE; border-left:4px solid #E8B04B;
+            border-radius:12px; padding:16px 20px; margin-bottom:14px; }
+        .aria-patient .pname { font-size:20px; font-weight:700; color:#0E3A46; }
+        .aria-patient .pmeta { font-size:13px; color:#5A7A80; margin-top:2px; }
+        .aria-patient .pdx { font-size:14px; color:#12262B; margin-top:10px; }
+        .aria-patient .pdx b { color:#155C6B; }
+        /* metric chips */
+        .aria-chips { display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 12px; }
+        .aria-chip { background:#EAF3F4; border:1px solid #CBDEDE; border-radius:999px;
+            padding:6px 14px; font-size:13px; color:#12262B; }
+        .aria-chip b { color:#155C6B; }
+        /* workspace nav (radio rendered as a tab bar) */
+        div[data-testid="stRadio"] div[role="radiogroup"] { gap:4px; border-bottom:2px solid #CBDEDE; }
+        div[data-testid="stRadio"] div[role="radiogroup"] > label { padding:8px 16px; margin-bottom:-2px; border-radius:8px 8px 0 0; }
+        div[data-testid="stRadio"] div[role="radiogroup"] > label:hover { background:#EAF3F4; }
+
         </style>
         """,
         unsafe_allow_html=True,
