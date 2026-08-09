@@ -1,5 +1,6 @@
 import re
 import html
+import random
 import streamlit as st
 from branding import PAGE_ICON, inject_style, render_header
 
@@ -16,6 +17,17 @@ from literacy_engine import generate_response, continue_conversation
 from log import log_interaction
 
 MAX_CLARIFYING_ROUNDS = 3
+
+# ARIA's confirmation line varies a little each time, so it reads like a person
+# checking in rather than a template.
+CONFIRM_PROMPTS = [
+    "This is what I understand to be the primary issues. Is this correct and complete?",
+    "Here's what I'm hearing as the main picture. Does that look right, and is anything missing?",
+    "This is how I'm reading the note so far. Have I captured it correctly, and is there anything to add?",
+    "Here's what stands out to me as the key points. Does this match your read, and is it complete?",
+    "This is my understanding of what matters most here. Is that accurate, and have I left anything out?",
+    "Here's the gist of what I'm taking from this. Correct me if I've got something wrong or missed something.",
+]
 
 
 def split_question(text: str):
@@ -62,7 +74,7 @@ def _format_value(v):
     return s
 
 
-def render_clinical_summary(parsed: dict):
+def render_clinical_summary(parsed: dict, lead: str = None):
     """Show ARIA's read of the note as a soft summary card instead of raw JSON."""
     skip = {"error"}
     rows = []
@@ -74,7 +86,7 @@ def render_clinical_summary(parsed: dict):
             rows.append((_humanize_key(k), fv))
 
     if not rows:
-        st.info("ARIA did not pull additional structured details from this note.")
+        st.info("I couldn't pull additional structured details from this note.")
         return
 
     row_html = "".join(
@@ -84,10 +96,9 @@ def render_clinical_summary(parsed: dict):
         f'</div>'
         for label, value in rows
     )
+    lead_html = f'<div class="aria-sum-lead">{html.escape(lead)}</div>' if lead else ""
     st.markdown(
-        '<div class="aria-summary">'
-        '<div class="aria-sum-lead">Here is ARIA\'s plain-language read of the note.</div>'
-        f'{row_html}</div>',
+        f'<div class="aria-summary">{lead_html}{row_html}</div>',
         unsafe_allow_html=True,
     )
 
@@ -143,28 +154,24 @@ if st.session_state.stage == "intake":
                 st.session_state.original_note = clinician_note
                 st.session_state.tier_choice_value = tier_map[tier_choice]
                 st.session_state.clarifications = []
+                st.session_state.confirm_prompt = random.choice(CONFIRM_PROMPTS)
                 st.session_state.stage = "confirm"
                 st.rerun()
 
 # ---------- STAGE: confirm (clinician verifies ARIA's read) ----------
 elif st.session_state.stage == "confirm":
-    st.markdown("#### Please confirm ARIA's read of the note")
-    st.write(
-        "Before searching the literature, take a quick look at what ARIA understood. "
-        "If anything is off, you can go back and adjust the note."
-    )
+    prompt = st.session_state.get("confirm_prompt", CONFIRM_PROMPTS[0])
+    st.markdown(f"**{prompt}**")
     render_clinical_summary(st.session_state.parsed)
-    with st.expander("Show the raw extracted fields"):
-        st.json(st.session_state.parsed)
 
     st.write("")
     c1, c2 = st.columns([1, 1])
     with c1:
-        if st.button("Yes, this is correct"):
+        if st.button("Yes, that's correct"):
             st.session_state.stage = "searching"
             st.rerun()
     with c2:
-        if st.button("No, I need to change something"):
+        if st.button("No, let me adjust something"):
             st.session_state.note_input = st.session_state.original_note
             st.session_state.stage = "intake"
             st.rerun()
@@ -281,8 +288,6 @@ elif st.session_state.stage == "conversation":
 
     with st.expander("ARIA's summary of the note", expanded=True):
         render_clinical_summary(st.session_state.parsed)
-        if st.checkbox("Show the raw extracted fields", key="show_raw_parsed"):
-            st.json(st.session_state.parsed)
 
     literature = st.session_state.literature
     num_sources = len(literature.get("sources", []))
