@@ -35,9 +35,16 @@ CONFIRM_PROMPTS = [
 
 TIER_MAP = {
     "Let ARIA decide": None,
-    "Tier 1 - Quick confirmation": 1,
-    "Tier 2 - Explore options": 2,
-    "Tier 3 - Deep teaching": 3,
+    "Quick check": 1,
+    "Explore options": 2,
+    "Deep teaching": 3,
+}
+
+LEVEL_DESCRIPTIONS = {
+    "Let ARIA decide": "I'll choose the depth based on your note.",
+    "Quick check": "I'll confirm the diagnosis and surface the key evidence, briefly.",
+    "Explore options": "I'll walk through the main options and what the research shows.",
+    "Deep teaching": "I'll give a fuller teaching response with the reasoning explained.",
 }
 
 V_OVERVIEW = "Overview"
@@ -131,6 +138,21 @@ def render_clinical_summary(parsed: dict, lead: str = None):
         for label, value in rows
     )
     st.markdown(f'<div class="aria-summary">{lead_html}{row_html}</div>', unsafe_allow_html=True)
+
+
+def render_level_selector(case):
+    """Prominent, always-visible choice of how much detail ARIA gives."""
+    with st.container(border=True):
+        st.markdown("**How would you like ARIA to work with you?**")
+        choice = st.radio(
+            "ARIA level",
+            list(TIER_MAP.keys()),
+            key=f"tier_{case['id']}",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        case["tier_choice_value"] = TIER_MAP[choice]
+        st.caption(LEVEL_DESCRIPTIONS.get(choice, ""))
 
 
 def compose_note(name, answers):
@@ -334,6 +356,18 @@ def render_sidebar():
         else:
             st.caption("No patients yet. Add one above to begin.")
 
+        st.markdown("---")
+        with st.expander("How to use ARIA"):
+            st.markdown(
+                "- **Add a patient** above; each keeps its own note, chart, and our conversation.\n"
+                "- **Intake**: paste a note or answer a few quick questions, pick how much detail you want, "
+                "then have me read it back to confirm.\n"
+                "- **Evidence & Guidance**: I search PubMed and talk it through; reply to me with follow-ups.\n"
+                "- **Overview**: the chart at a glance; use *Edit patient details* to change the name or any field.\n"
+                "- **Measures & Trends**: standardized measures as a table and chart.\n"
+                "- Practice and synthetic data only for this pilot."
+            )
+
 
 # ---------------------------------------------------------------------------
 # Views
@@ -341,6 +375,8 @@ def render_sidebar():
 def render_intake(case):
     st.markdown(f"##### Intake · {case['name']}")
     st.write("I can work from a note you already have, or we can build the picture together. Both are optional, so do whichever is easier.")
+
+    render_level_selector(case)
 
     with st.expander("Build the note with a few quick questions (all optional)", expanded=not case.get("note")):
         st.caption("Answer whatever you know and skip the rest. I'll draft a note from your answers that you can edit before I read it back.")
@@ -367,9 +403,6 @@ def render_intake(case):
         st.session_state[note_key] = case.get("note", "")
     note_val = st.text_area("Clinical note", key=note_key, height=220)
     case["note"] = note_val
-
-    tier_choice = st.selectbox("How much detail would you like from me?", list(TIER_MAP.keys()), key=f"tier_{case['id']}")
-    case["tier_choice_value"] = TIER_MAP[tier_choice]
 
     if st.button("Read it back to me", key=f"read_{case['id']}"):
         if not note_val.strip():
@@ -516,7 +549,8 @@ def render_literature(case):
         return
 
     if case["literature"] is None and not case["pending_question"]:
-        st.write("I'll search PubMed for evidence relevant to this patient, then talk it through with you at the level of detail you chose.")
+        render_level_selector(case)
+        st.write("I'll search PubMed for evidence relevant to this patient, then talk it through with you at the level you chose above.")
         if st.button("Find the evidence", key=f"search_{case['id']}"):
             with st.spinner("Searching the medical literature..."):
                 advance_search(case)
@@ -656,11 +690,18 @@ render_sidebar()
 case = active_case()
 if case is None:
     st.markdown("#### Welcome to ARIA")
-    st.write(
-        "Add a patient in the panel on the left and I'll help you build the chart, pull the "
-        "evidence, and think it through. Each patient keeps their own note, chart, and our "
-        "conversation, so you can move between people and pick up where we left off."
+    st.write("I'm ARIA, your clinical thinking partner for rehabilitation. Here's how we'll work together.")
+    st.markdown(
+        "1. **Add a patient** in the panel on the left. Give a name or label and I'll assign a case number.\n"
+        "2. **Intake** — paste a note you already have, or answer a few quick questions and I'll draft one for you. "
+        "This is also where you choose **how much detail you want from me**.\n"
+        "3. I'll **read the note back** so you can confirm I've understood it before going further.\n"
+        "4. **Evidence & Guidance** — I search PubMed and talk it through as a mentor. Ask me follow-up questions anytime.\n"
+        "5. **Overview** shows the chart at a glance (and you can edit patient details there), and "
+        "**Measures & Trends** turns standardized measures into tables and charts.\n"
     )
+    st.info("This pilot uses practice and synthetic data only. Please don't enter real patient information.")
+    st.write("**Add your first patient on the left to begin.**")
     st.stop()
 
 if "_goto_view" in st.session_state:
