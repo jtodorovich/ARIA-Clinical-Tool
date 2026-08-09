@@ -65,14 +65,14 @@ def inject_style():
         .aria-hero {
             display: flex; align-items: center; gap: 18px;
             background: linear-gradient(105deg, #0E3A46 0%, #155C6B 55%, #1E7A8C 100%);
-            border-radius: 16px; padding: 18px 24px; margin: 0 0 16px 0;
+            border-radius: 16px; padding: 22px 30px; margin: 0 0 16px 0;
             border-bottom: 3px solid #E8B04B;
             box-shadow: 0 6px 20px rgba(14,58,70,0.18);
         }
-        .aria-hero img { width: 60px; height: 60px; flex: 0 0 auto; }
-        .aria-hero .word { font-weight: 700; font-size: 30px; letter-spacing: 3px; color: #FFFFFF; line-height: 1.05; }
-        .aria-hero .tag { font-size: 13.5px; font-weight: 500; color: #9FD9DC; margin-top: 2px; }
-        .aria-hero .val { font-size: 12.5px; color: #CDEBEC; margin-top: 6px; opacity: 0.9; }
+        .aria-hero img { width: 78px; height: 78px; flex: 0 0 auto; }
+        .aria-hero .word { font-weight: 700; font-size: 46px; letter-spacing: 5px; color: #FFFFFF; line-height: 1.02; }
+        .aria-hero .tag { font-size: 18.5px; font-weight: 500; color: #9FD9DC; margin-top: 4px; }
+        .aria-hero .val { font-size: 14px; color: #CDEBEC; margin-top: 6px; opacity: 0.92; }
         /* patient header card (Executive Chart) */
         .aria-patient { background:#FFFFFF; border:1px solid #CBDEDE; border-left:4px solid #E8B04B;
             border-radius:12px; padding:16px 20px; margin-bottom:14px; }
@@ -89,6 +89,23 @@ def inject_style():
         div[data-testid="stRadio"] div[role="radiogroup"] { gap:4px; border-bottom:2px solid #CBDEDE; }
         div[data-testid="stRadio"] div[role="radiogroup"] > label { padding:8px 16px; margin-bottom:-2px; border-radius:8px 8px 0 0; }
         div[data-testid="stRadio"] div[role="radiogroup"] > label:hover { background:#EAF3F4; }
+
+        /* input contrast: make fields stand out from the tinted page */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {
+            background-color:#FFFFFF !important; border:1px solid #A9C9CD !important;
+            border-radius:8px !important; box-shadow:0 1px 2px rgba(14,58,70,0.06) !important;
+        }
+        .stTextInput input:focus, .stTextArea textarea:focus {
+            border-color:#1E7A8C !important; box-shadow:0 0 0 3px rgba(30,122,140,0.18) !important;
+        }
+        [data-baseweb="select"] > div { background-color:#FFFFFF !important; border-color:#A9C9CD !important; }
+        [data-baseweb="base-input"] { background-color:#FFFFFF !important; }
+        /* ARIA speaking directly to the user */
+        .aria-ask { display:flex; align-items:flex-start; gap:12px; background:#FFFFFF;
+            border:1px solid #CBDEDE; border-left:4px solid #1E7A8C; border-radius:10px;
+            padding:14px 16px; margin:6px 0; }
+        .aria-ask img { width:34px; height:34px; flex:0 0 auto; margin-top:1px; }
+        .aria-ask .q { color:#0E3A46; font-size:15px; font-weight:600; line-height:1.5; }
 
         </style>
         """,
