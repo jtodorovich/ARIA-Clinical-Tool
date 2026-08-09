@@ -40,7 +40,23 @@ TIER_MAP = {
     "Tier 3 - Deep teaching": 3,
 }
 
-VIEWS = ["Executive Chart", "Scribe Tool", "Graphical Analysis", "Literature & Evidence"]
+V_OVERVIEW = "Overview"
+V_INTAKE = "Intake"
+V_MEASURES = "Measures & Trends"
+V_EVIDENCE = "Evidence & Guidance"
+VIEWS = [V_OVERVIEW, V_INTAKE, V_MEASURES, V_EVIDENCE]
+
+# Optional guided-intake questions. All skippable.
+INTAKE_FIELDS = [
+    ("age_sex", "Age and sex", "e.g., 67-year-old male"),
+    ("diagnosis", "Primary problem or diagnosis", "e.g., left MCA ischemic stroke, right hemiparesis"),
+    ("history", "Brief history / onset", "e.g., 12 weeks post-stroke, moving to outpatient"),
+    ("goals", "Patient goals", "e.g., walk to the mailbox; self-feed with right hand"),
+    ("precautions", "Safety concerns or precautions", "e.g., two near-falls this week; foot drop"),
+    ("measures", "Key standardized measures", "e.g., BBS 38/56; 10MWT 0.35 m/s; FMA-UE 22/66"),
+    ("medications", "Current medications", "e.g., Baclofen 10 mg TID; Clopidogrel 75 mg"),
+    ("focus", "What would you like my help with?", "e.g., prioritizing gait vs. UE work"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -55,11 +71,20 @@ def split_question(text: str):
     return text, None
 
 
+def render_aria_question(text: str):
+    """Render a question as ARIA speaking directly to the clinician."""
+    st.markdown(
+        f'<div class="aria-ask"><img src="{PAGE_ICON}" alt="ARIA"/>'
+        f'<div class="q">{html.escape(text)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_aria_message(text: str):
     main_text, question = split_question(text)
     st.markdown(main_text)
     if question:
-        st.info(f"**ARIA is asking:** {question}")
+        render_aria_question(question)
 
 
 def _humanize_key(k: str) -> str:
@@ -84,7 +109,6 @@ def _format_value(v):
 
 
 def render_clinical_summary(parsed: dict, lead: str = None):
-    """Soft summary card in place of raw JSON."""
     skip = {"error"}
     rows = []
     for k, v in (parsed or {}).items():
@@ -109,11 +133,31 @@ def render_clinical_summary(parsed: dict, lead: str = None):
     st.markdown(f'<div class="aria-summary">{lead_html}{row_html}</div>', unsafe_allow_html=True)
 
 
+def compose_note(name, answers):
+    order = [
+        ("age_sex", "Age/Sex"),
+        ("diagnosis", "Primary problem / diagnosis"),
+        ("history", "History"),
+        ("goals", "Patient goals"),
+        ("precautions", "Safety / precautions"),
+        ("measures", "Standardized measures"),
+        ("medications", "Current medications"),
+        ("focus", "Requested focus"),
+    ]
+    lines = []
+    if name:
+        lines.append(f"Patient: {name}")
+    for k, label in order:
+        v = (answers.get(k) or "").strip()
+        if v:
+            lines.append(f"{label}: {v}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
-# Standardized-measure extraction (for the Graphical Analysis tab)
+# Standardized-measure extraction (Measures & Trends tab)
 # ---------------------------------------------------------------------------
 def extract_metrics(text: str):
-    """Return a list of {measure, result, max, pct, detail} pulled from the note."""
     if not text:
         return []
     t = text.replace("\u2013", "-").replace("\u2014", "-")
@@ -166,13 +210,14 @@ def extract_metrics(text: str):
 
 
 # ---------------------------------------------------------------------------
-# Patient-case model (in-session; swap-in a database later without UI changes)
+# Patient-case model (in-session)
 # ---------------------------------------------------------------------------
 def blank_case(cid, name):
     return {
         "id": cid,
         "name": name or cid,
         "created": datetime.datetime.now().strftime("%b %d, %Y %I:%M %p"),
+        "edit_rev": 0,
         "note": "",
         "parsed": None,
         "metrics": [],
@@ -197,7 +242,7 @@ def ensure_state():
         st.session_state.case_counter = 0
         st.session_state.name_nonce = 0
     if "view" not in st.session_state:
-        st.session_state.view = "Scribe Tool"
+        st.session_state.view = V_INTAKE
 
 
 def create_case(name):
@@ -217,10 +262,9 @@ def active_case():
 
 
 # ---------------------------------------------------------------------------
-# Literature search helpers
+# Literature helpers
 # ---------------------------------------------------------------------------
 def advance_search(case):
-    """One search attempt: either sets literature, or sets a clarifying question."""
     literature = retrieve_literature_smart(case["note"], case["parsed"], case["clarifications"])
     if literature.get("sources") or len(case["clarifications"]) >= MAX_CLARIFYING_ROUNDS:
         case["literature"] = literature
@@ -236,7 +280,7 @@ def finalize_response(case):
     case["responded"] = True
     if result.get("tier_used") is None:
         case["tier_used"] = None
-        case["response_error"] = result.get("response_text", "ARIA could not generate a response.")
+        case["response_error"] = result.get("response_text", "I wasn't able to generate a response.")
         return
     case["tier_used"] = result["tier_used"]
     case["tier_rationale"] = result.get("tier_rationale")
@@ -257,7 +301,7 @@ def finalize_response(case):
 
 
 # ---------------------------------------------------------------------------
-# Sidebar: patient case manager
+# Sidebar
 # ---------------------------------------------------------------------------
 def render_sidebar():
     with st.sidebar:
@@ -266,20 +310,20 @@ def render_sidebar():
         new_name = st.text_input("New patient (name or label)",
                                  key=f"new_case_name_{nonce}",
                                  placeholder="e.g., Vance, E.")
-        if st.button("Add patient case", width="stretch"):
+        if st.button("Add patient", width="stretch"):
             create_case(new_name.strip())
             st.session_state.name_nonce = nonce + 1
-            st.session_state.view = "Scribe Tool"
+            st.session_state.view = V_INTAKE
             st.rerun()
 
         order = st.session_state.get("case_order", [])
         if order:
             st.markdown("---")
-            st.caption("Open a case")
+            st.caption("Open a patient")
             labels = {cid: f"{st.session_state.cases[cid]['name']}  ·  {cid}" for cid in order}
             prev = st.session_state.get("case_picker")
             chosen = st.radio(
-                "Open a case",
+                "Open a patient",
                 order,
                 format_func=lambda c: labels[c],
                 key="case_picker",
@@ -294,9 +338,29 @@ def render_sidebar():
 # ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
-def render_scribe(case):
-    st.markdown(f"##### Scribe Tool  ·  {case['name']}")
-    st.write("Enter or dictate the clinical note. ARIA will read it back for your confirmation before doing anything else.")
+def render_intake(case):
+    st.markdown(f"##### Intake · {case['name']}")
+    st.write("I can work from a note you already have, or we can build the picture together. Both are optional, so do whichever is easier.")
+
+    with st.expander("Build the note with a few quick questions (all optional)", expanded=not case.get("note")):
+        st.caption("Answer whatever you know and skip the rest. I'll draft a note from your answers that you can edit before I read it back.")
+        gnk = f"gname_{case['id']}"
+        if gnk not in st.session_state:
+            st.session_state[gnk] = case["name"]
+        st.text_input("Patient name or label", key=gnk)
+        answers = {}
+        for fkey, label, ph in INTAKE_FIELDS:
+            answers[fkey] = st.text_input(label, key=f"g_{fkey}_{case['id']}", placeholder=ph)
+        if st.button("Draft the note from these answers", key=f"gbuild_{case['id']}"):
+            composed = compose_note(st.session_state[gnk].strip(), answers)
+            if not composed.strip():
+                st.warning("Add at least one detail above, or just type a note below.")
+            else:
+                if st.session_state[gnk].strip():
+                    case["name"] = st.session_state[gnk].strip()
+                case["note"] = composed
+                st.session_state.pop(f"note_{case['id']}", None)  # let the note box re-seed
+                st.rerun()
 
     note_key = f"note_{case['id']}"
     if note_key not in st.session_state:
@@ -304,15 +368,14 @@ def render_scribe(case):
     note_val = st.text_area("Clinical note", key=note_key, height=220)
     case["note"] = note_val
 
-    tkey = f"tier_{case['id']}"
-    tier_choice = st.selectbox("Response style", list(TIER_MAP.keys()), key=tkey)
+    tier_choice = st.selectbox("How much detail would you like from me?", list(TIER_MAP.keys()), key=f"tier_{case['id']}")
     case["tier_choice_value"] = TIER_MAP[tier_choice]
 
-    if st.button("Have ARIA read it", key=f"read_{case['id']}"):
+    if st.button("Read it back to me", key=f"read_{case['id']}"):
         if not note_val.strip():
-            st.warning("Please enter the note first.")
+            st.warning("Please add the note first.")
         else:
-            with st.spinner("ARIA is reading the note..."):
+            with st.spinner("Reading the note..."):
                 parsed = parse_clinician_note(note_val)
             if parsed.get("error"):
                 st.error(parsed["error"])
@@ -338,19 +401,19 @@ def render_scribe(case):
         with c1:
             if st.button("Yes, that's correct", key=f"yes_{case['id']}"):
                 case["confirmed"] = True
-                st.session_state._goto_view = "Literature & Evidence"
+                st.session_state._goto_view = V_EVIDENCE
                 st.rerun()
         with c2:
             if st.button("No, let me adjust something", key=f"no_{case['id']}"):
                 case["parsed"] = None
                 st.rerun()
     elif case["confirmed"]:
-        st.success("ARIA has confirmed its read of this note. Open Literature & Evidence for guidance, or the Executive Chart for the overview.")
+        st.success("Great, I've got the picture. Open Evidence & Guidance for my take, or the Overview for the chart.")
         render_clinical_summary(case["parsed"])
 
 
 def render_executive(case):
-    st.markdown("##### Executive Chart")
+    st.markdown("##### Overview")
     parsed = case.get("parsed") or {}
     dx = _format_value(parsed.get("diagnosis")) or "Not yet determined"
     st.markdown(
@@ -362,8 +425,40 @@ def render_executive(case):
         unsafe_allow_html=True,
     )
 
+    with st.expander("Edit patient details"):
+        enk = f"editname_{case['id']}"
+        if enk not in st.session_state:
+            st.session_state[enk] = case["name"]
+        st.text_input("Patient name or label", key=enk)
+
+        base_rows = [{"Field": _humanize_key(k), "Value": _format_value(v) or ""}
+                     for k, v in parsed.items() if k != "error"]
+        if not base_rows:
+            base_rows = [{"Field": "", "Value": ""}]
+        edited = st.data_editor(
+            pd.DataFrame(base_rows),
+            num_rows="dynamic",
+            width="stretch",
+            hide_index=True,
+            key=f"edit_tbl_{case['id']}_{case.get('edit_rev', 0)}",
+        )
+        st.caption("Edit a value, rename a field, add a row, or delete one. Then save.")
+        if st.button("Save changes", key=f"savep_{case['id']}"):
+            case["name"] = st.session_state[enk].strip() or case["name"]
+            newp = {}
+            for _, r in edited.iterrows():
+                fld = str(r.get("Field", "")).strip()
+                val = str(r.get("Value", "")).strip()
+                if fld:
+                    newp[fld.lower().replace(" ", "_")] = val
+            if newp:
+                case["parsed"] = newp
+            case["edit_rev"] = case.get("edit_rev", 0) + 1
+            st.success("Saved.")
+            st.rerun()
+
     if not case["parsed"]:
-        st.info("This case is new. Start in the Scribe Tool to enter the note.")
+        st.info("This patient is new. Head to the Intake tab to get started.")
         return
 
     if case.get("metrics"):
@@ -373,35 +468,33 @@ def render_executive(case):
         )
         st.markdown(f'<div class="aria-chips">{chips}</div>', unsafe_allow_html=True)
 
-    st.markdown("**ARIA's read of the case**")
+    st.markdown("**The picture so far**")
     render_clinical_summary(case["parsed"])
 
     aria_msgs = [t["content"] for t in case.get("conversation", []) if t["role"] == "assistant"]
     if aria_msgs:
         main, q = split_question(aria_msgs[-1])
-        st.markdown("**ARIA's latest guidance**")
+        st.markdown("**My latest guidance**")
         st.markdown(main[:700] + ("..." if len(main) > 700 else ""))
         if q:
-            st.info(f"**ARIA is asking:** {q}")
+            render_aria_question(q)
     else:
-        st.caption("No ARIA guidance yet. Open Literature & Evidence and run the search.")
+        st.caption("We haven't gotten to my guidance yet. Head to Evidence & Guidance and I'll pull the evidence.")
 
 
 def render_graphical(case):
-    st.markdown("##### Graphical Analysis")
+    st.markdown("##### Measures & Trends")
     if not case["parsed"]:
-        st.info("Enter and confirm a note in the Scribe Tool first.")
+        st.info("Add and confirm a note in the Intake tab first.")
         return
 
     metrics = case.get("metrics") or []
     if not metrics:
-        st.info("ARIA did not detect standardized measures in this note. As measures are added to the record, they will appear here as tables and charts.")
+        st.info("I didn't detect standardized measures in this note. As measures are added to the record, they'll appear here as tables and charts.")
         return
 
     df = pd.DataFrame([
-        {"Measure": m["measure"],
-         "Result": m["result"],
-         "Site / notes": m["detail"]}
+        {"Measure": m["measure"], "Result": m["result"], "Site / notes": m["detail"]}
         for m in metrics
     ])
     st.dataframe(df, hide_index=True, width="stretch")
@@ -413,32 +506,30 @@ def render_graphical(case):
             index=[m["measure"] for m in pct_rows],
         )
         st.bar_chart(chart_df)
-        st.caption("Scored measures shown as a percent of their maximum score. As this case is reassessed over time, this is where progress trends will appear.")
+        st.caption("Scored measures shown as a percent of their maximum. As this patient is reassessed over time, this is where progress trends will appear.")
 
 
 def render_literature(case):
-    st.markdown("##### Literature & Evidence")
+    st.markdown("##### Evidence & Guidance")
     if not case["confirmed"]:
-        st.info("Confirm ARIA's read of the note in the Scribe Tool first.")
+        st.info("Let's confirm the note in the Intake tab first, then I'll pull the evidence.")
         return
 
-    # 1) Not started yet
     if case["literature"] is None and not case["pending_question"]:
-        st.write("ARIA will search PubMed for evidence relevant to this case, then respond as a mentor calibrated to your chosen level of detail.")
-        if st.button("Search the literature", key=f"search_{case['id']}"):
-            with st.spinner("Searching medical literature..."):
+        st.write("I'll search PubMed for evidence relevant to this patient, then talk it through with you at the level of detail you chose.")
+        if st.button("Find the evidence", key=f"search_{case['id']}"):
+            with st.spinner("Searching the medical literature..."):
                 advance_search(case)
             st.rerun()
         return
 
-    # 2) Awaiting a clarifying answer
     if case["pending_question"]:
-        st.info(f"ARIA is refining the search ({len(case['clarifications']) + 1} of {MAX_CLARIFYING_ROUNDS}).")
-        st.markdown(f"**ARIA is asking:** {case['pending_question']}")
+        st.caption(f"Let me narrow this down ({len(case['clarifications']) + 1} of {MAX_CLARIFYING_ROUNDS}).")
+        render_aria_question(case["pending_question"])
         ans = st.text_input("Your answer", key=f"clar_{case['id']}_{len(case['clarifications'])}")
         c1, c2 = st.columns([1, 1])
         with c1:
-            if st.button("Submit answer", key=f"clarsub_{case['id']}"):
+            if st.button("Send answer", key=f"clarsub_{case['id']}"):
                 if ans.strip():
                     case["clarifications"].append({"question": case["pending_question"], "answer": ans})
                     case["pending_question"] = None
@@ -446,19 +537,18 @@ def render_literature(case):
                         advance_search(case)
                     st.rerun()
                 else:
-                    st.warning("Enter an answer, or skip.")
+                    st.warning("Type an answer, or skip.")
         with c2:
             if st.button("Skip and proceed", key=f"clarskip_{case['id']}"):
                 literature = retrieve_literature_smart(case["note"], case["parsed"], case["clarifications"])
-                literature["note"] = "No matching literature was found even after clarifying questions. ARIA will respond using clinical reasoning alone."
+                literature["note"] = "I couldn't find closely matching literature even after those questions, so I'll reason from clinical principles."
                 case["literature"] = literature
                 case["pending_question"] = None
                 st.rerun()
         return
 
-    # 3) Literature is set; generate ARIA's response once
     if not case["responded"]:
-        with st.spinner("Preparing ARIA's response..."):
+        with st.spinner("Putting my thoughts together..."):
             finalize_response(case)
         st.rerun()
 
@@ -471,11 +561,10 @@ def render_literature(case):
             st.rerun()
         return
 
-    # 4) Show ARIA's response + conversation
     literature = case["literature"]
     if literature.get("note"):
         st.info(literature["note"])
-    st.markdown(f"**Response tier:** {case['tier_used']}")
+    st.caption(f"Detail level: {case['tier_used']}")
     st.divider()
 
     for turn in case["conversation"]:
@@ -487,14 +576,14 @@ def render_literature(case):
                 st.markdown(turn["content"])
 
     num_sources = len(literature.get("sources", []))
-    with st.expander(f"About the literature ({num_sources} source(s) found)"):
+    with st.expander(f"The evidence I used ({num_sources} source(s))"):
         st.markdown("**Source:** PubMed, via the National Library of Medicine's NCBI database")
         if literature.get("query_used"):
-            st.markdown(f"**Search query used:**\n```\n{literature['query_used']}\n```")
+            st.markdown(f"**Search I ran:**\n```\n{literature['query_used']}\n```")
         if literature.get("rationale"):
             st.markdown(f"**Why these terms:** {literature['rationale']}")
         if case["clarifications"]:
-            st.markdown("**Clarifying questions used to refine the search:**")
+            st.markdown("**What I asked to narrow the search:**")
             for c in case["clarifications"]:
                 st.markdown(f"- *{c['question']}* -> {c['answer']}")
         if literature.get("note"):
@@ -504,13 +593,13 @@ def render_literature(case):
             st.write(source["abstract"])
 
     st.divider()
-    follow_up = st.text_input("Respond to ARIA, ask a question, or share your thinking:", key=f"follow_{case['id']}")
+    follow_up = st.text_input("Reply to me, ask a question, or share your thinking:", key=f"follow_{case['id']}")
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("Send", key=f"send_{case['id']}"):
             if follow_up.strip():
                 case["conversation"].append({"role": "user", "content": follow_up})
-                with st.spinner("ARIA is thinking..."):
+                with st.spinner("Thinking..."):
                     reply = continue_conversation(case["conversation"], case["tier_used"])
                 case["conversation"].append({"role": "assistant", "content": reply})
                 log_interaction({
@@ -522,9 +611,9 @@ def render_literature(case):
                 })
                 st.rerun()
             else:
-                st.warning("Please enter a message before sending.")
+                st.warning("Please type a message before sending.")
     with c2:
-        if st.button("Re-run the search", key=f"rerun_{case['id']}"):
+        if st.button("Search again", key=f"rerun_{case['id']}"):
             case["literature"] = None
             case["responded"] = False
             case["response_error"] = None
@@ -535,7 +624,7 @@ def render_literature(case):
             st.rerun()
 
     st.divider()
-    st.caption("How did this interaction go?")
+    st.caption("How did this go?")
     feedback = st.radio(
         "Feedback:",
         options=["Very helpful", "Somewhat helpful", "Not helpful", "Confusing"],
@@ -543,7 +632,7 @@ def render_literature(case):
         index=None,
         key=f"fb_{case['id']}",
     )
-    feedback_notes = st.text_input("Anything ARIA got wrong, or that was unclear? (optional)", key=f"fbn_{case['id']}")
+    feedback_notes = st.text_input("Anything I got wrong, or that was unclear? (optional)", key=f"fbn_{case['id']}")
     if st.button("Submit feedback", key=f"fbsub_{case['id']}"):
         if feedback:
             log_interaction({
@@ -553,9 +642,9 @@ def render_literature(case):
                 "rating": feedback,
                 "notes": feedback_notes,
             })
-            st.success("Thanks, feedback logged.")
+            st.success("Thanks, that's logged.")
         else:
-            st.warning("Please select a rating first.")
+            st.warning("Please pick a rating first.")
 
 
 # ---------------------------------------------------------------------------
@@ -566,11 +655,11 @@ render_sidebar()
 
 case = active_case()
 if case is None:
-    st.markdown("#### Welcome to the ARIA workspace")
+    st.markdown("#### Welcome to ARIA")
     st.write(
-        "Add a patient case in the panel on the left to begin. Each case keeps its own note, "
-        "ARIA's read of it, the literature, and your conversation, so you can move between "
-        "patients and pick up right where you left off."
+        "Add a patient in the panel on the left and I'll help you build the chart, pull the "
+        "evidence, and think it through. Each patient keeps their own note, chart, and our "
+        "conversation, so you can move between people and pick up where we left off."
     )
     st.stop()
 
@@ -580,11 +669,11 @@ if "_goto_view" in st.session_state:
 view = st.radio("Workspace", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
 
-if view == "Executive Chart":
+if view == V_OVERVIEW:
     render_executive(case)
-elif view == "Scribe Tool":
-    render_scribe(case)
-elif view == "Graphical Analysis":
+elif view == V_INTAKE:
+    render_intake(case)
+elif view == V_MEASURES:
     render_graphical(case)
-elif view == "Literature & Evidence":
+elif view == V_EVIDENCE:
     render_literature(case)
