@@ -266,7 +266,7 @@ def render_sidebar():
         new_name = st.text_input("New patient (name or label)",
                                  key=f"new_case_name_{nonce}",
                                  placeholder="e.g., Vance, E.")
-        if st.button("Add patient case", use_container_width=True):
+        if st.button("Add patient case", width="stretch"):
             create_case(new_name.strip())
             st.session_state.name_nonce = nonce + 1
             st.session_state.view = "Scribe Tool"
@@ -338,7 +338,7 @@ def render_scribe(case):
         with c1:
             if st.button("Yes, that's correct", key=f"yes_{case['id']}"):
                 case["confirmed"] = True
-                st.session_state.view = "Literature & Evidence"
+                st.session_state._goto_view = "Literature & Evidence"
                 st.rerun()
         with c2:
             if st.button("No, let me adjust something", key=f"no_{case['id']}"):
@@ -404,7 +404,7 @@ def render_graphical(case):
          "Site / notes": m["detail"]}
         for m in metrics
     ])
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, width="stretch")
 
     pct_rows = [m for m in metrics if m["pct"] is not None]
     if pct_rows:
@@ -573,6 +573,9 @@ if case is None:
         "patients and pick up right where you left off."
     )
     st.stop()
+
+if "_goto_view" in st.session_state:
+    st.session_state.view = st.session_state.pop("_goto_view")
 
 view = st.radio("Workspace", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
