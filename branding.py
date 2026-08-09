@@ -86,9 +86,9 @@ def inject_style():
             padding:6px 14px; font-size:13px; color:#12262B; }
         .aria-chip b { color:#155C6B; }
         /* workspace nav (radio rendered as a tab bar) */
-        div[data-testid="stRadio"] div[role="radiogroup"] { gap:4px; border-bottom:2px solid #CBDEDE; }
-        div[data-testid="stRadio"] div[role="radiogroup"] > label { padding:8px 16px; margin-bottom:-2px; border-radius:8px 8px 0 0; }
-        div[data-testid="stRadio"] div[role="radiogroup"] > label:hover { background:#EAF3F4; }
+        .st-key-view div[role="radiogroup"] { gap:4px; border-bottom:2px solid #CBDEDE; }
+        .st-key-view div[role="radiogroup"] > label { padding:8px 16px; margin-bottom:-2px; border-radius:8px 8px 0 0; }
+        .st-key-view div[role="radiogroup"] > label:hover { background:#EAF3F4; }
 
         /* input contrast: make fields stand out from the tinted page */
         .stTextInput input, .stTextArea textarea, .stNumberInput input {
