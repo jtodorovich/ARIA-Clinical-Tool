@@ -1,4 +1,5 @@
 import re
+import html
 import streamlit as st
 from branding import PAGE_ICON, inject_style, render_header
 
@@ -38,6 +39,59 @@ def render_aria_message(text: str):
         st.info(f"**ARIA is asking:** {question}")
 
 
+def _humanize_key(k: str) -> str:
+    """Turn a field name like 'chief_complaint' into 'Chief complaint'."""
+    return k.replace("_", " ").strip().capitalize()
+
+
+def _format_value(v):
+    """Render a parsed value as clean readable text, or None if empty."""
+    if isinstance(v, (list, tuple)):
+        items = [str(x).strip() for x in v if str(x).strip()]
+        return ", ".join(items) if items else None
+    if isinstance(v, dict):
+        parts = []
+        for kk, vv in v.items():
+            fv = _format_value(vv)
+            if fv:
+                parts.append(f"{_humanize_key(kk)}: {fv}")
+        return "; ".join(parts) if parts else None
+    s = str(v).strip()
+    if not s or s.lower() in ("none", "null", "n/a", "na", "unknown", "not specified"):
+        return None
+    return s
+
+
+def render_clinical_summary(parsed: dict):
+    """Show ARIA's read of the note as a soft summary card instead of raw JSON."""
+    skip = {"error"}
+    rows = []
+    for k, v in parsed.items():
+        if k in skip:
+            continue
+        fv = _format_value(v)
+        if fv:
+            rows.append((_humanize_key(k), fv))
+
+    if not rows:
+        st.info("ARIA did not pull additional structured details from this note.")
+        return
+
+    row_html = "".join(
+        f'<div class="aria-sum-row">'
+        f'<span class="aria-sum-label">{html.escape(label)}</span>'
+        f'<span class="aria-sum-val">{html.escape(value)}</span>'
+        f'</div>'
+        for label, value in rows
+    )
+    st.markdown(
+        '<div class="aria-summary">'
+        '<div class="aria-sum-lead">Here is ARIA\'s plain-language read of the note.</div>'
+        f'{row_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 if "stage" not in st.session_state:
     st.session_state.stage = "intake"
     st.session_state.conversation = []
@@ -58,6 +112,7 @@ def reset_case():
     st.session_state.original_note = None
     st.session_state.tier_choice_value = None
     st.session_state.clarifications = []
+    st.session_state.pop("note_input", None)
 
 
 tier_map = {
@@ -71,7 +126,7 @@ tier_map = {
 if st.session_state.stage == "intake":
     st.write("Enter a clinician note below. ARIA will confirm the diagnosis, pull relevant literature, and respond as a mentor calibrated to your preferred level of detail.")
 
-    clinician_note = st.text_area("Enter a clinician note or query:")
+    clinician_note = st.text_area("Enter a clinician note or query:", key="note_input")
     tier_choice = st.selectbox("Response style:", options=list(tier_map.keys()))
 
     if st.button("Submit"):
@@ -88,8 +143,31 @@ if st.session_state.stage == "intake":
                 st.session_state.original_note = clinician_note
                 st.session_state.tier_choice_value = tier_map[tier_choice]
                 st.session_state.clarifications = []
-                st.session_state.stage = "searching"
+                st.session_state.stage = "confirm"
                 st.rerun()
+
+# ---------- STAGE: confirm (clinician verifies ARIA's read) ----------
+elif st.session_state.stage == "confirm":
+    st.markdown("#### Please confirm ARIA's read of the note")
+    st.write(
+        "Before searching the literature, take a quick look at what ARIA understood. "
+        "If anything is off, you can go back and adjust the note."
+    )
+    render_clinical_summary(st.session_state.parsed)
+    with st.expander("Show the raw extracted fields"):
+        st.json(st.session_state.parsed)
+
+    st.write("")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Yes, this is correct"):
+            st.session_state.stage = "searching"
+            st.rerun()
+    with c2:
+        if st.button("No, I need to change something"):
+            st.session_state.note_input = st.session_state.original_note
+            st.session_state.stage = "intake"
+            st.rerun()
 
 # ---------- STAGE: searching (with clarifying loop) ----------
 elif st.session_state.stage == "searching":
@@ -201,8 +279,10 @@ elif st.session_state.stage == "conversation":
             else:
                 st.markdown(f"**{role_label}:** {turn['content']}")
 
-    with st.expander("See extracted clinical data"):
-        st.json(st.session_state.parsed)
+    with st.expander("ARIA's summary of the note", expanded=True):
+        render_clinical_summary(st.session_state.parsed)
+        if st.checkbox("Show the raw extracted fields", key="show_raw_parsed"):
+            st.json(st.session_state.parsed)
 
     literature = st.session_state.literature
     num_sources = len(literature.get("sources", []))
