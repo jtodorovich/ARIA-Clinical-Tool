@@ -4,6 +4,7 @@ from branding import PAGE_ICON, inject_style, render_header
 
 st.set_page_config(page_title="ARIA", page_icon=PAGE_ICON, layout="wide")
 inject_style()
+render_header()
 
 from auth import require_login
 
@@ -36,8 +37,6 @@ def render_aria_message(text: str):
     if question:
         st.info(f"**ARIA is asking:** {question}")
 
-
-render_header()
 
 if "stage" not in st.session_state:
     st.session_state.stage = "intake"
