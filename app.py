@@ -1,5 +1,10 @@
-﻿import re
+ import re
 import streamlit as st
+from branding import PAGE_ICON, inject_style, render_header
+
+st.set_page_config(page_title="ARIA", page_icon=PAGE_ICON, layout="wide")
+inject_style()
+
 from auth import require_login
 
 require_login()
@@ -32,8 +37,7 @@ def render_aria_message(text: str):
         st.info(f"**ARIA is asking:** {question}")
 
 
-st.title("ARIA")
-st.subheader("Adaptive Rehabilitation Intelligence Assistant")
+render_header()
 
 if "stage" not in st.session_state:
     st.session_state.stage = "intake"
@@ -212,7 +216,7 @@ elif st.session_state.stage == "conversation":
         if st.session_state.clarifications:
             st.markdown("**Clarifying questions used to refine the search:**")
             for c in st.session_state.clarifications:
-                st.markdown(f"- *{c['question']}* → {c['answer']}")
+                st.markdown(f"- *{c['question']}* -> {c['answer']}")
         if literature.get("note"):
             st.info(literature["note"])
         for source in literature.get("sources", []):
@@ -267,4 +271,3 @@ elif st.session_state.stage == "conversation":
             st.success("Thanks, feedback logged.")
         else:
             st.warning("Please select a rating first.")
-
