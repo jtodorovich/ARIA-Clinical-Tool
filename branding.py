@@ -50,6 +50,17 @@ def inject_style():
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
 
+        /* ARIA note-summary card */
+        .aria-summary {
+            background:#FFFFFF; border:1px solid #CBDEDE; border-left:4px solid #1E7A8C;
+            border-radius:10px; padding:14px 18px;
+        }
+        .aria-sum-lead { color:#0E3A46; font-weight:600; margin-bottom:10px; }
+        .aria-sum-row { display:flex; gap:14px; padding:6px 0; border-top:1px solid #EEF4F4; }
+        .aria-sum-row:first-of-type { border-top:none; }
+        .aria-sum-label { flex:0 0 160px; color:#155C6B; font-weight:600; font-size:13.5px; }
+        .aria-sum-val { color:#12262B; font-size:14px; line-height:1.5; }
+
         /* ARIA header band */
         .aria-hero {
             display: flex; align-items: center; gap: 18px;
