@@ -64,11 +64,21 @@ def _normalize(data: dict) -> dict:
     return out
 
 
+def _clean_reason(err: str) -> str:
+    """Short, non-sensitive hint for the UI so failures are diagnosable."""
+    if not err:
+        return "no response"
+    err = str(err)
+    # never surface anything that could be a secret
+    err = re.sub(r"(?i)(api[-_ ]?key|authorization|bearer|sk-[A-Za-z0-9\-_]+)", "[redacted]", err)
+    return err[:200]
+
+
 def parse_clinician_note(raw_input: str, max_attempts: int = 3) -> dict:
     """
     Send a clinician's free-text note to Claude and return structured data.
-    Robust to minor formatting variation in the model's reply; retries a few
-    times before giving up, and always returns a dict.
+    Uses the proven call shape, with a higher token budget, automatic retries,
+    flexible JSON recovery, and field normalization. Always returns a dict.
     """
     if not raw_input or not raw_input.strip():
         return {"error": "Please enter a note before I read it.", "raw_response": ""}
@@ -81,12 +91,10 @@ Return ONLY a single valid JSON object, with exactly these fields:
 - "treatment_history": string, or null if not mentioned
 - "query_intent": one of "treatment_recommendation", "literature_lookup", "general_question"
 
-Do not include any explanation, markdown, or code fences — only the JSON object.
+Do not include any explanation or extra text. Return only the JSON object.
 
 Clinician note:
-<note>
-{raw_input}
-</note>"""
+\"\"\"{raw_input}\"\"\""""
 
     last_raw, last_err = "", None
     for _ in range(max_attempts):
@@ -94,39 +102,26 @@ Clinician note:
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=1024,
-                system="You extract structured clinical data and reply with a single valid JSON object and nothing else.",
-                messages=[
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": "{"},  # prefill biases a JSON-only reply
-                ],
+                messages=[{"role": "user", "content": prompt}],
             )
-        except Exception as e:  # transient API/network error — try again
-            last_err = f"API error: {e}"
+        except Exception as e:  # transient/API error — try again
+            last_err = f"API error: {type(e).__name__}: {e}"
             continue
 
         text = _extract_text(response)
         last_raw = text
-
-        # Try the reply as-is first (handles a full object, fences, or stray
-        # chatter); then, if needed, restore the prefilled leading brace.
-        candidates = [text]
-        if text and not text.lstrip().startswith("{"):
-            candidates.append("{" + text)
-
-        parsed = None
-        for cand in candidates:
-            try:
-                parsed = _extract_json(cand)
-                break
-            except Exception as e:
-                last_err = f"parse error: {e}"
-
-        if isinstance(parsed, dict):
-            return _normalize(parsed)
+        try:
+            data = _extract_json(text)
+            if isinstance(data, dict):
+                return _normalize(data)
+            last_err = "the response was not a JSON object"
+        except Exception as e:
+            last_err = f"parse error: {e}"
 
     return {
-        "error": "I had trouble reading that note. Please try again, or simplify the note slightly and resubmit.",
-        "raw_response": last_raw or (last_err or ""),
+        "error": ("I had trouble reading that note. Please try again, or simplify it "
+                  "slightly and resubmit.  (Details: " + _clean_reason(last_err) + ")"),
+        "raw_response": last_raw,
     }
 
 
